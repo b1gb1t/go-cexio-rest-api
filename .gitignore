@@ -15,3 +15,4 @@
 
 # Custom
  *.swp
+ *_test.go

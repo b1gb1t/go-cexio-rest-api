@@ -1,8 +1,7 @@
 package cexioapi
 
 import (
-	_"fmt"
-	_"log"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,15 +20,16 @@ type CexioAPI struct {
 	Username	string
 	Key			string
 	Secret		string
-
+	Debug		bool
 	Client		*http.Client
 }
 
-func NewCexioAPI(username string, key string, secret string) (*CexioAPI){
+func NewCexioAPI(username string, key string, secret string, debug bool) (*CexioAPI){
 	api := &CexioAPI{
 		Username: 	username,
 		Key:		key,
 		Secret:		secret,
+		Debug:		debug,
 	}
 
 	api.Client = &http.Client{}
@@ -37,6 +37,21 @@ func NewCexioAPI(username string, key string, secret string) (*CexioAPI){
 	return api
 }
 
+func checkError(ctx string, err error) {
+	if err != nil {
+		log.Fatalf("Context: %s; Error: %v", ctx, err)
+	}
+}
+
+func (api *CexioAPI) debugLog(ctx string, req *http.Request, res *http.Response) {
+	if api.Debug {
+		log.Println("### Debug ###")
+		log.Printf("Context: %s", ctx)
+		log.Printf("Request:\n%v\n", req)
+		log.Printf("Response:\n%v", res)
+		log.Println("#############")
+	}
+}
 
 func (api *CexioAPI) APICall(endpoint string, method string, params string, data map[string][]string, private bool) (interface{}){
 	u := APIEndpoint + endpoint
@@ -44,7 +59,7 @@ func (api *CexioAPI) APICall(endpoint string, method string, params string, data
 	if params != "" { u = u + "/" + params }
 	
 	req, err := http.NewRequest(method, u, nil)
-	checkError(err)
+	checkError("request", err)
 	
 	if method == "POST" {
 		v := url.Values(data)
@@ -55,15 +70,15 @@ func (api *CexioAPI) APICall(endpoint string, method string, params string, data
 		req.Body = ioutil.NopCloser(strings.NewReader(v.Encode()))
 	}
 	
-	
 	res, err := api.Client.Do(req)
-	checkError(err)
-
+	checkError("response", err)
 	defer res.Body.Close()
-	
+
+	api.debugLog(endpoint, req, res)
+
 	var t interface{}
 	err = json.NewDecoder(res.Body).Decode(&t)
-	checkError(err)
+	checkError("json - parse response", err)
 
 	return t
 }
