@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"encoding/json"
 	"io/ioutil"
+	"fmt"
+	"reflect"
 )
 
 
@@ -37,11 +39,6 @@ func NewCexioAPI(username string, key string, secret string, debug bool) (*Cexio
 	return api
 }
 
-func checkError(ctx string, err error) {
-	if err != nil {
-		log.Fatalf("Context: %s; Error: %v", ctx, err)
-	}
-}
 
 func (api *CexioAPI) debugLog(ctx string, req *http.Request, res *http.Response) {
 	if api.Debug {
@@ -53,13 +50,15 @@ func (api *CexioAPI) debugLog(ctx string, req *http.Request, res *http.Response)
 	}
 }
 
-func (api *CexioAPI) APICall(endpoint string, method string, params string, data map[string][]string, private bool) (interface{}){
+func (api *CexioAPI) APICall(endpoint string, method string, params string, data map[string][]string, private bool) (interface{}, error){
 	u := APIEndpoint + endpoint
 
 	if params != "" { u = u + "/" + params }
 	
 	req, err := http.NewRequest(method, u, nil)
-	checkError("request", err)
+	if err != nil {
+		return nil, &customError{err, "request"}
+	}
 	
 	if method == "POST" {
 		v := url.Values(data)
@@ -71,73 +70,103 @@ func (api *CexioAPI) APICall(endpoint string, method string, params string, data
 	}
 	
 	res, err := api.Client.Do(req)
-	checkError("response", err)
+	if err != nil {
+		return nil, &customError{err, "response"}
+	}
+
+	if res.StatusCode != 200 {
+		e := fmt.Errorf("HTTP Error Code: %d", res.StatusCode)
+		return nil, &customError{e, "response"}
+	}
+
 	defer res.Body.Close()
 
 	api.debugLog(endpoint, req, res)
 
 	var t interface{}
 	err = json.NewDecoder(res.Body).Decode(&t)
-	checkError("json - parse response", err)
+	if err != nil {
+		return nil, &customError{err, "(JSON) Decode response"}
+	}
 
-	return t
+	// API does not return a standard format
+	typeOf := reflect.ValueOf(t)
+	if typeOf.Kind() == reflect.Map {
+		data := t.(map[string]interface{})
+		err, exist := data["error"]
+		if exist {
+			e := fmt.Errorf("%s", err)
+			return nil, &customError{e, "API error"}
+		}
+	}
+
+	return t, nil
 }
 
 
 //Public functions
 
-func (api *CexioAPI) CurrencyLimits() (interface{}){
-	return api.APICall("currency_limits", "GET", "", nil, false)
+func (api *CexioAPI) CurrencyLimits() (map[string]interface{}, error){
+	res, err := api.APICall("currency_limits", "GET", "", nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) Ticker(base string, currency string) (interface{}){
+func (api *CexioAPI) Ticker(base string, currency string) (map[string]interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
-	return api.APICall("ticker", "GET", params, nil, false)
+	res, err := api.APICall("ticker", "GET", params, nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) Tickers(base string, currency string) (interface{}){
+func (api *CexioAPI) Tickers(base string, currency string) (map[string]interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
-	return api.APICall("tickers", "GET", params, nil, false)
+	res, err := api.APICall("tickers", "GET", params, nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) LastPrice(base string, currency string) (interface{}){
+func (api *CexioAPI) LastPrice(base string, currency string) (interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
-	return api.APICall("last_price", "GET", params, nil, false)
+	res, err := api.APICall("last_price", "GET", params, nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) LastPrices(base string, currency string, currency2 string) (interface{}){
+func (api *CexioAPI) LastPrices(base string, currency string, currency2 string) (interface{}, error){
 	params := strings.ToUpper(base + "/" + currency + "/" + currency2)
-	return api.APICall("last_prices", "GET", params, nil, false)
+	res, err := api.APICall("last_prices", "GET", params, nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) Converter(base string, currency string, amount string) (interface{}){
+func (api *CexioAPI) Converter(base string, currency string, amount string) (interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
 	data := map[string][]string{ "amnt": []string{amount} }
-	return api.APICall("convert", "POST", params, data, false)
+	res, err := api.APICall("convert", "POST", params, data, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) Chart(base string, currency string, lastHours string, maxRespArrSize string) (interface{}){
+func (api *CexioAPI) Chart(base string, currency string, lastHours string, maxRespArrSize string) ([]interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
 	data := map[string][]string {
 		"lastHours": []string{lastHours},
 		"maxRespArrSize": []string{maxRespArrSize},
 	}
-	return api.APICall("price_stats", "POST", params, data, false)
+	res, err := api.APICall("price_stats", "POST", params, data, false)
+	return res.([]interface{}), err
 }
 
-func (api *CexioAPI) OhlcvChart(base string, currency string, date string) (interface{}){
+func (api *CexioAPI) OhlcvChart(base string, currency string, date string) (interface{}, error){
 	params := date + "/" + strings.ToUpper(base + "/" + currency)
-	return api.APICall("ohlcv/hd", "GET", params, nil, false)
+	res, err := api.APICall("ohlcv/hd", "GET", params, nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) Orderbook(base string, currency string) (interface{}){
+func (api *CexioAPI) Orderbook(base string, currency string) (interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
-	return api.APICall("order_book", "GET", params, nil, false)
+	res, err := api.APICall("order_book", "GET", params, nil, false)
+	return res.(map[string]interface{}), err
 }
 
-func (api *CexioAPI) TradeHistory(base string, currency string) (interface{}){
+func (api *CexioAPI) TradeHistory(base string, currency string) ([]interface{}, error){
 	params := strings.ToUpper(base + "/" + currency)
-	return api.APICall("trade_history", "GET", params, nil, false)
-
+	res, err := api.APICall("trade_history", "GET", params, nil, false)
+	return res.([]interface{}), err
 }
 
